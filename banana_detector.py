@@ -43,28 +43,49 @@ cudart.cudaDeviceSynchronize.restype  = ctypes.c_int
 
 
 def cuda_check(status, where="CUDA call"):
+    """
+    Checks the return status of a CUDA API call.
+    Used to ensure that CUDA operations (like memory allocation or copying) completed successfully.
+    Raises a RuntimeError if the status indicates an error.
+    """
     if status != 0:
         raise RuntimeError(f"{where} failed with error code {status}")
 
 
 def cuda_malloc(nbytes):
+    """
+    Allocates memory on the GPU.
+    Used to create buffers for input and output tensors on the device before inference.
+    """
     ptr = ctypes.c_void_p()
     cuda_check(cudart.cudaMalloc(ctypes.byref(ptr), nbytes), "cudaMalloc")
     return ptr
 
 
 def cuda_free(ptr):
+    """
+    Frees allocated GPU memory.
+    Used to clean up resources and prevent memory leaks after the program finishes.
+    """
     if ptr:
         cuda_check(cudart.cudaFree(ptr), "cudaFree")
 
 
 def cuda_memcpy(dst, src, nbytes, kind):
+    """
+    Copies memory between Host (CPU) and Device (GPU).
+    Used to transfer input images to the GPU and retrieve inference results back to the CPU.
+    """
     cuda_check(cudart.cudaMemcpy(dst, src, nbytes, kind), "cudaMemcpy")
 
 
 # ========== TENSORRT SETUP ==========
 
 def load_engine(path):
+    """
+    Loads and deserializes a TensorRT engine from a file.
+    Used to load the pre-trained YOLO model optimized for inference on the GPU.
+    """
     logger = trt.Logger(trt.Logger.INFO)
     with open(path, "rb") as f, trt.Runtime(logger) as runtime:
         engine = runtime.deserialize_cuda_engine(f.read())
@@ -75,6 +96,9 @@ def load_engine(path):
 
 def make_context_and_buffers(engine):
     """
+    Creates an execution context and allocates input/output buffers.
+    Used to setup the necessary environment and memory on the GPU for running the inference engine.
+    
     Use new TensorRT API:
       - get_tensor_name
       - get_tensor_shape
@@ -105,6 +129,9 @@ def make_context_and_buffers(engine):
 
 def preprocess(frame):
     """
+    Prepares an input image frame for inference.
+    Used to resize, color convert, normalize, and transpose the image to match the model's input requirements.
+    
     Resize → BGR→RGB → normalize → CHW → batch dimension
     """
     img = cv2.resize(frame, (INPUT_W, INPUT_H))
@@ -116,6 +143,9 @@ def preprocess(frame):
 
 def nms(boxes, scores, iou_threshold=0.5):
     """
+    Performs Non-Maximum Suppression (NMS).
+    Used to eliminate overlapping bounding boxes and keep only the best detection for each object.
+
     Pure NumPy Non-Maximum Suppression with division-by-zero protection.
     boxes: (N,4) xyxy
     scores: (N,)
@@ -161,6 +191,10 @@ def nms(boxes, scores, iou_threshold=0.5):
 
 
 def postprocess(output, frame):
+    """
+    Processes the raw output from the model.
+    Used to decode predictions, filter by class (banana) and confidence, apply NMS, and draw bounding boxes on the frame.
+    """
     h, w = frame.shape[:2]
     out = output[0]
 
@@ -248,6 +282,10 @@ def postprocess(output, frame):
 # ========== MAIN LOOP ==========
 
 def main():
+    """
+    Main entry point of the application.
+    Used to initialize the engine, setup the camera, and run the real-time inference loop.
+    """
     print("Loading TensorRT engine...")
     engine = load_engine(ENGINE_PATH)
     ctx, input_name, output_name, in_shape, out_shape, d_input, d_output = make_context_and_buffers(engine)
