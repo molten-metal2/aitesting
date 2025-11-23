@@ -11,6 +11,7 @@ INPUT_H       = 640
 CONF_THRESH   = 0.50  # Increased from 0.30 to reduce false positives
 BANANA_CLASS = 46
 NMS_IOU_THRESH = 0.45  # IoU threshold for NMS - lower = more aggressive suppression
+DEBUG_MODE    = True   # Set to False to disable debug output
 # --------------------------
 
 
@@ -176,14 +177,24 @@ def postprocess(output, frame):
     best_cls_ids    = cls_scores.argmax(axis=1)
 
     scores = best_cls_scores
+    
+    if DEBUG_MODE:
+        total_detections = len(scores)
+    
     mask = scores > CONF_THRESH
 
     if not np.any(mask):
+        if DEBUG_MODE:
+            print(f"[DEBUG] Total detections: {total_detections}, After conf filter: 0")
         return frame, 0
 
     boxes_xyxy = boxes_xyxy[mask]
     scores     = scores[mask]
     cls_ids    = best_cls_ids[mask]
+    
+    if DEBUG_MODE:
+        after_conf = len(scores)
+        print(f"[DEBUG] Total detections: {total_detections}, After conf>{CONF_THRESH}: {after_conf}")
 
     # Keep only bananas
     banana_mask = cls_ids == BANANA_CLASS
@@ -191,12 +202,24 @@ def postprocess(output, frame):
     scores     = scores[banana_mask]
 
     if len(scores) == 0:
+        if DEBUG_MODE:
+            print(f"[DEBUG] No banana detections (class {BANANA_CLASS})")
         return frame, 0
+    
+    if DEBUG_MODE:
+        print(f"[DEBUG] Banana detections before NMS: {len(scores)}")
+        for i in range(len(scores)):
+            print(f"  Box {i}: conf={scores[i]:.3f}, bbox={boxes_xyxy[i]}")
 
     # ---- Apply NMS here ----
     keep = nms(boxes_xyxy, scores, iou_threshold=NMS_IOU_THRESH)
 
     banana_count = len(keep)
+    
+    if DEBUG_MODE:
+        print(f"[DEBUG] After NMS (IoU={NMS_IOU_THRESH}): {banana_count} bananas kept")
+        print(f"[DEBUG] Kept indices: {keep}")
+        print("-" * 60)
 
     # Draw kept boxes
     for i in keep:
