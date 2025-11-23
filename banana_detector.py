@@ -8,8 +8,10 @@ import ctypes.util
 ENGINE_PATH   = "/home/david/yolov8n.engine"
 INPUT_W       = 640
 INPUT_H       = 640
-CONF_THRESH   = 0.30
+CONF_THRESH   = 0.50  # Increased from 0.30 to reduce false positives
 BANANA_CLASS = 46
+NMS_IOU_THRESH = 0.45  # IoU threshold for NMS - lower = more aggressive suppression
+DEBUG_MODE    = True   # Set to False to disable debug output
 # --------------------------
 
 
@@ -114,7 +116,7 @@ def preprocess(frame):
 
 def nms(boxes, scores, iou_threshold=0.5):
     """
-    Pure NumPy Non-Maximum Suppression.
+    Pure NumPy Non-Maximum Suppression with division-by-zero protection.
     boxes: (N,4) xyxy
     scores: (N,)
     Returns indices of kept boxes.
@@ -136,6 +138,9 @@ def nms(boxes, scores, iou_threshold=0.5):
         i = order[0]
         keep.append(i)
 
+        if order.size == 1:
+            break
+
         xx1 = np.maximum(x1[i], x1[order[1:]])
         yy1 = np.maximum(y1[i], y1[order[1:]])
         xx2 = np.minimum(x2[i], x2[order[1:]])
@@ -144,7 +149,10 @@ def nms(boxes, scores, iou_threshold=0.5):
         w = np.maximum(0.0, xx2 - xx1)
         h = np.maximum(0.0, yy2 - yy1)
         inter = w * h
-        iou = inter / (areas[i] + areas[order[1:]] - inter)
+        
+        # Add epsilon to prevent division by zero
+        union = areas[i] + areas[order[1:]] - inter
+        iou = inter / (union + 1e-6)
 
         inds = np.where(iou <= iou_threshold)[0]
         order = order[inds + 1]
@@ -162,13 +170,23 @@ def postprocess(output, frame):
     else:
         pred = out
 
-    boxes_xyxy = pred[:, :4]       # x1,y1,x2,y2 in 640x640
+    # YOLOv8 outputs boxes in xywh format (center_x, center_y, width, height)
+    # Convert to xyxy format (x1, y1, x2, y2)
+    boxes_xywh = pred[:, :4]
+    cx, cy, w_box, h_box = boxes_xywh[:, 0], boxes_xywh[:, 1], boxes_xywh[:, 2], boxes_xywh[:, 3]
+    x1 = cx - w_box / 2
+    y1 = cy - h_box / 2
+    x2 = cx + w_box / 2
+    y2 = cy + h_box / 2
+    boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1)
+    
     cls_scores = pred[:, 4:]
 
     best_cls_scores = cls_scores.max(axis=1)
     best_cls_ids    = cls_scores.argmax(axis=1)
 
     scores = best_cls_scores
+    
     mask = scores > CONF_THRESH
 
     if not np.any(mask):
@@ -185,11 +203,25 @@ def postprocess(output, frame):
 
     if len(scores) == 0:
         return frame, 0
+    
+    # Only print debug when we have banana detections
+    if DEBUG_MODE and len(scores) > 0:
+        print(f"\n[DEBUG] Banana detections before NMS: {len(scores)}")
+        for i in range(min(5, len(scores))):  # Show max 5 boxes
+            print(f"  Box {i}: conf={scores[i]:.3f}, bbox=[{boxes_xyxy[i][0]:.1f}, {boxes_xyxy[i][1]:.1f}, {boxes_xyxy[i][2]:.1f}, {boxes_xyxy[i][3]:.1f}]")
+        if len(scores) > 5:
+            print(f"  ... and {len(scores) - 5} more")
 
     # ---- Apply NMS here ----
-    keep = nms(boxes_xyxy, scores, iou_threshold=0.5)
+    keep = nms(boxes_xyxy, scores, iou_threshold=NMS_IOU_THRESH)
 
     banana_count = len(keep)
+    
+    if DEBUG_MODE and len(scores) > 0:
+        print(f"[DEBUG] After NMS (IoU={NMS_IOU_THRESH}): {banana_count} banana(s) kept")
+        if banana_count != len(scores):
+            print(f"[DEBUG] Suppressed {len(scores) - banana_count} duplicate detection(s)")
+        print("-" * 60)
 
     # Draw kept boxes
     for i in keep:
