@@ -8,8 +8,9 @@ import ctypes.util
 ENGINE_PATH   = "/home/david/yolov8n.engine"
 INPUT_W       = 640
 INPUT_H       = 640
-CONF_THRESH   = 0.30
+CONF_THRESH   = 0.50  # Increased from 0.30 to reduce false positives
 BANANA_CLASS = 46
+NMS_IOU_THRESH = 0.45  # IoU threshold for NMS - lower = more aggressive suppression
 # --------------------------
 
 
@@ -114,7 +115,7 @@ def preprocess(frame):
 
 def nms(boxes, scores, iou_threshold=0.5):
     """
-    Pure NumPy Non-Maximum Suppression.
+    Pure NumPy Non-Maximum Suppression with division-by-zero protection.
     boxes: (N,4) xyxy
     scores: (N,)
     Returns indices of kept boxes.
@@ -136,6 +137,9 @@ def nms(boxes, scores, iou_threshold=0.5):
         i = order[0]
         keep.append(i)
 
+        if order.size == 1:
+            break
+
         xx1 = np.maximum(x1[i], x1[order[1:]])
         yy1 = np.maximum(y1[i], y1[order[1:]])
         xx2 = np.minimum(x2[i], x2[order[1:]])
@@ -144,7 +148,10 @@ def nms(boxes, scores, iou_threshold=0.5):
         w = np.maximum(0.0, xx2 - xx1)
         h = np.maximum(0.0, yy2 - yy1)
         inter = w * h
-        iou = inter / (areas[i] + areas[order[1:]] - inter)
+        
+        # Add epsilon to prevent division by zero
+        union = areas[i] + areas[order[1:]] - inter
+        iou = inter / (union + 1e-6)
 
         inds = np.where(iou <= iou_threshold)[0]
         order = order[inds + 1]
@@ -187,7 +194,7 @@ def postprocess(output, frame):
         return frame, 0
 
     # ---- Apply NMS here ----
-    keep = nms(boxes_xyxy, scores, iou_threshold=0.5)
+    keep = nms(boxes_xyxy, scores, iou_threshold=NMS_IOU_THRESH)
 
     banana_count = len(keep)
 
