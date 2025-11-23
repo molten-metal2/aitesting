@@ -170,7 +170,16 @@ def postprocess(output, frame):
     else:
         pred = out
 
-    boxes_xyxy = pred[:, :4]       # x1,y1,x2,y2 in 640x640
+    # YOLOv8 outputs boxes in xywh format (center_x, center_y, width, height)
+    # Convert to xyxy format (x1, y1, x2, y2)
+    boxes_xywh = pred[:, :4]
+    cx, cy, w_box, h_box = boxes_xywh[:, 0], boxes_xywh[:, 1], boxes_xywh[:, 2], boxes_xywh[:, 3]
+    x1 = cx - w_box / 2
+    y1 = cy - h_box / 2
+    x2 = cx + w_box / 2
+    y2 = cy + h_box / 2
+    boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1)
+    
     cls_scores = pred[:, 4:]
 
     best_cls_scores = cls_scores.max(axis=1)
@@ -178,23 +187,14 @@ def postprocess(output, frame):
 
     scores = best_cls_scores
     
-    if DEBUG_MODE:
-        total_detections = len(scores)
-    
     mask = scores > CONF_THRESH
 
     if not np.any(mask):
-        if DEBUG_MODE:
-            print(f"[DEBUG] Total detections: {total_detections}, After conf filter: 0")
         return frame, 0
 
     boxes_xyxy = boxes_xyxy[mask]
     scores     = scores[mask]
     cls_ids    = best_cls_ids[mask]
-    
-    if DEBUG_MODE:
-        after_conf = len(scores)
-        print(f"[DEBUG] Total detections: {total_detections}, After conf>{CONF_THRESH}: {after_conf}")
 
     # Keep only bananas
     banana_mask = cls_ids == BANANA_CLASS
@@ -202,23 +202,25 @@ def postprocess(output, frame):
     scores     = scores[banana_mask]
 
     if len(scores) == 0:
-        if DEBUG_MODE:
-            print(f"[DEBUG] No banana detections (class {BANANA_CLASS})")
         return frame, 0
     
-    if DEBUG_MODE:
-        print(f"[DEBUG] Banana detections before NMS: {len(scores)}")
-        for i in range(len(scores)):
-            print(f"  Box {i}: conf={scores[i]:.3f}, bbox={boxes_xyxy[i]}")
+    # Only print debug when we have banana detections
+    if DEBUG_MODE and len(scores) > 0:
+        print(f"\n[DEBUG] Banana detections before NMS: {len(scores)}")
+        for i in range(min(5, len(scores))):  # Show max 5 boxes
+            print(f"  Box {i}: conf={scores[i]:.3f}, bbox=[{boxes_xyxy[i][0]:.1f}, {boxes_xyxy[i][1]:.1f}, {boxes_xyxy[i][2]:.1f}, {boxes_xyxy[i][3]:.1f}]")
+        if len(scores) > 5:
+            print(f"  ... and {len(scores) - 5} more")
 
     # ---- Apply NMS here ----
     keep = nms(boxes_xyxy, scores, iou_threshold=NMS_IOU_THRESH)
 
     banana_count = len(keep)
     
-    if DEBUG_MODE:
-        print(f"[DEBUG] After NMS (IoU={NMS_IOU_THRESH}): {banana_count} bananas kept")
-        print(f"[DEBUG] Kept indices: {keep}")
+    if DEBUG_MODE and len(scores) > 0:
+        print(f"[DEBUG] After NMS (IoU={NMS_IOU_THRESH}): {banana_count} banana(s) kept")
+        if banana_count != len(scores):
+            print(f"[DEBUG] Suppressed {len(scores) - banana_count} duplicate detection(s)")
         print("-" * 60)
 
     # Draw kept boxes
