@@ -44,9 +44,7 @@ cudart.cudaDeviceSynchronize.restype  = ctypes.c_int
 
 def cuda_check(status, where="CUDA call"):
     """
-    Checks the return status of a CUDA API call.
-    Used to ensure that CUDA operations (like memory allocation or copying) completed successfully.
-    Raises a RuntimeError if the status indicates an error.
+    Used to ensure that CUDA operations completed successfully.
     """
     if status != 0:
         raise RuntimeError(f"{where} failed with error code {status}")
@@ -54,7 +52,7 @@ def cuda_check(status, where="CUDA call"):
 
 def cuda_malloc(nbytes):
     """
-    Allocates memory on the GPU.
+    Allocates memory and holds the address of the allocated memory on the GPU.
     Used to create buffers for input and output tensors on the device before inference.
     """
     ptr = ctypes.c_void_p()
@@ -73,7 +71,6 @@ def cuda_free(ptr):
 
 def cuda_memcpy(dst, src, nbytes, kind):
     """
-    Copies memory between Host (CPU) and Device (GPU).
     Used to transfer input images to the GPU and retrieve inference results back to the CPU.
     """
     cuda_check(cudart.cudaMemcpy(dst, src, nbytes, kind), "cudaMemcpy")
@@ -84,7 +81,7 @@ def cuda_memcpy(dst, src, nbytes, kind):
 def load_engine(path):
     """
     Loads and deserializes a TensorRT engine from a file.
-    Used to load the pre-trained YOLO model optimized for inference on the GPU.
+    Used to load the pre-trained YOLO model.
     """
     logger = trt.Logger(trt.Logger.INFO)
     with open(path, "rb") as f, trt.Runtime(logger) as runtime:
@@ -96,8 +93,8 @@ def load_engine(path):
 
 def make_context_and_buffers(engine):
     """
-    Creates an execution context and allocates input/output buffers.
-    Used to setup the necessary environment and memory on the GPU for running the inference engine.
+    Used to setup the necessary environment and memory on the GPU for running the inference engine, 
+    by creating an execution context and allocating input/output buffers.
     
     Use new TensorRT API:
       - get_tensor_name
