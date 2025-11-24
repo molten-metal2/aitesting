@@ -12,6 +12,8 @@ from config import (
 
 from cuda import (
     cudart,
+    cudaMemcpyHostToDevice,
+    cudaMemcpyDeviceToHost,
     cuda_malloc, 
     cuda_free, 
     cuda_memcpy,
