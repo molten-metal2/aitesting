@@ -1,125 +1,32 @@
 import cv2
 import numpy as np
-import tensorrt as trt
 import ctypes
 import ctypes.util
 
-# --------- CONFIG ---------
-ENGINE_PATH   = "/home/david/yolov8n.engine"
-INPUT_W       = 640
-INPUT_H       = 640
-CONF_THRESH   = 0.50  # Increased from 0.30 to reduce false positives
-BANANA_CLASS = 46
-NMS_IOU_THRESH = 0.45  # IoU threshold for NMS - lower = more aggressive suppression
-DEBUG_MODE    = True   # Set to False to disable debug output
-# --------------------------
+from config import (
+    ENGINE_PATH,
+    INPUT_W,
+    INPUT_H,
+    CONF_THRESH,
+    BANANA_CLASS,
+    NMS_IOU_THRESH,
+    DEBUG_MODE,
+    cudart,
+    cudaMemcpyHostToDevice,
+    cudaMemcpyDeviceToHost,
+)
 
+from cuda import (
+    cuda_check, 
+    cuda_malloc, 
+    cuda_free, 
+    cuda_memcpy
+)
 
-# ========== CUDA RUNTIME VIA CTYPES (NO PYCUDA) ==========
-# Find and load libcudart.so
-libcudart_path = ctypes.util.find_library("cudart")
-if libcudart_path is None:
-    raise RuntimeError("Could not find libcudart.so (CUDA runtime). Is CUDA installed and in ldconfig?")
-
-cudart = ctypes.CDLL(libcudart_path)
-
-# cudaMemcpy kinds
-cudaMemcpyHostToDevice = 1
-cudaMemcpyDeviceToHost = 2
-
-# Set function signatures
-cudart.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
-cudart.cudaMalloc.restype  = ctypes.c_int
-
-cudart.cudaFree.argtypes = [ctypes.c_void_p]
-cudart.cudaFree.restype  = ctypes.c_int
-
-cudart.cudaMemcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
-                              ctypes.c_size_t, ctypes.c_int]
-cudart.cudaMemcpy.restype  = ctypes.c_int
-
-cudart.cudaDeviceSynchronize.argtypes = []
-cudart.cudaDeviceSynchronize.restype  = ctypes.c_int
-
-
-def cuda_check(status, where="CUDA call"):
-    """
-    Used to ensure that CUDA operations completed successfully.
-    """
-    if status != 0:
-        raise RuntimeError(f"{where} failed with error code {status}")
-
-
-def cuda_malloc(nbytes):
-    """
-    Allocates memory and holds the address of the allocated memory on the GPU.
-    Used to create buffers for input and output tensors on the device before inference.
-    """
-    ptr = ctypes.c_void_p()
-    cuda_check(cudart.cudaMalloc(ctypes.byref(ptr), nbytes), "cudaMalloc")
-    return ptr
-
-
-def cuda_free(ptr):
-    """
-    Frees allocated GPU memory.
-    Used to clean up resources and prevent memory leaks after the program finishes.
-    """
-    if ptr:
-        cuda_check(cudart.cudaFree(ptr), "cudaFree")
-
-
-def cuda_memcpy(dst, src, nbytes, kind):
-    """
-    Used to transfer input images to the GPU and retrieve inference results back to the CPU.
-    """
-    cuda_check(cudart.cudaMemcpy(dst, src, nbytes, kind), "cudaMemcpy")
-
-
-# ========== TENSORRT SETUP ==========
-
-def load_engine(path):
-    """
-    Loads and deserializes a TensorRT engine from a file.
-    Used to load the pre-trained YOLO model.
-    """
-    logger = trt.Logger(trt.Logger.INFO)
-    with open(path, "rb") as f, trt.Runtime(logger) as runtime:
-        engine = runtime.deserialize_cuda_engine(f.read())
-    if engine is None:
-        raise RuntimeError("Failed to deserialize engine")
-    return engine
-
-
-def make_context_and_buffers(engine):
-    """
-    Used to setup the necessary environment and memory on the GPU for running the inference engine, 
-    by creating an execution context and allocating input/output buffers.
-    
-    Use new TensorRT API:
-      - get_tensor_name
-      - get_tensor_shape
-      - get_tensor_dtype
-      - set_tensor_address
-      - execute_async_v3
-    """
-    ctx = engine.create_execution_context()
-
-    # We know there are 2 tensors: input and output
-    input_name  = engine.get_tensor_name(0)
-    output_name = engine.get_tensor_name(1)
-
-    in_shape  = engine.get_tensor_shape(input_name)   # (1, 3, 640, 640)
-    out_shape = engine.get_tensor_shape(output_name)  # (1, 84, 8400)
-
-    # Allocate GPU buffers
-    in_size  = int(np.prod(in_shape)) * np.dtype(np.float32).itemsize
-    out_size = int(np.prod(out_shape)) * np.dtype(np.float32).itemsize
-
-    d_input  = cuda_malloc(in_size)
-    d_output = cuda_malloc(out_size)
-
-    return ctx, input_name, output_name, in_shape, out_shape, d_input, d_output
+from tensorrt_engine import (
+    load_engine,
+    make_context_and_buffers
+)
 
 
 # ========== PRE/POST PROCESSING ==========
