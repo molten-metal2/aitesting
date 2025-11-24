@@ -1,7 +1,28 @@
 import numpy as np
 import tensorrt as trt
-from cuda import cuda_malloc
+from cuda import cuda_malloc, cuda_free
 from errors import EngineInitializationError
+
+
+class TensorRTState:
+    """
+    Encapsulates the state required for TensorRT inference.
+    """
+    def __init__(self, ctx, input_name, output_name, in_shape, out_shape, d_input, d_output):
+        self.ctx = ctx
+        self.input_name = input_name
+        self.output_name = output_name
+        self.in_shape = in_shape
+        self.out_shape = out_shape
+        self.d_input = d_input
+        self.d_output = d_output
+
+    def cleanup(self):
+        """Frees the allocated GPU memory."""
+        if self.d_input:
+            cuda_free(self.d_input)
+        if self.d_output:
+            cuda_free(self.d_output)
 
 
 # ========== TENSORRT SETUP ==========
@@ -9,18 +30,18 @@ from errors import EngineInitializationError
 def initialize_engine(engine_path):
     """
     Initialize TensorRT engine and GPU buffers.
-    Returns engine context, tensor names, shapes, and device pointers.
+    Returns a TensorRTState object containing context, tensor names, shapes, and device pointers.
     Raises EngineInitializationError if initialization fails.
     """
     try:
         print("Loading TensorRT engine...")
         engine = load_engine(engine_path)
-        ctx, input_name, output_name, in_shape, out_shape, d_input, d_output = make_context_and_buffers(engine)
+        trt_state = make_context_and_buffers(engine)
         
-        print("Input tensor:", input_name, "shape:", in_shape)
-        print("Output tensor:", output_name, "shape:", out_shape)
+        print("Input tensor:", trt_state.input_name, "shape:", trt_state.in_shape)
+        print("Output tensor:", trt_state.output_name, "shape:", trt_state.out_shape)
         
-        return ctx, input_name, output_name, in_shape, out_shape, d_input, d_output
+        return trt_state
     except Exception as e:
         raise EngineInitializationError(f"Failed to initialize TensorRT engine: {e}") from e
 
@@ -65,4 +86,4 @@ def make_context_and_buffers(engine):
     d_input  = cuda_malloc(in_size)
     d_output = cuda_malloc(out_size)
 
-    return ctx, input_name, output_name, in_shape, out_shape, d_input, d_output
+    return TensorRTState(ctx, input_name, output_name, in_shape, out_shape, d_input, d_output)
