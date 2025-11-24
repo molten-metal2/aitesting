@@ -37,3 +37,11 @@ def cuda_memcpy(dst, src, nbytes, kind):
     Used to transfer input images to the GPU and retrieve inference results back to the CPU.
     """
     cuda_check(cudart.cudaMemcpy(dst, src, nbytes, kind), "cudaMemcpy")
+
+
+def cuda_synchronize():
+    """
+    Synchronize with CUDA device to ensure all operations complete.
+    Includes error checking.
+    """
+    cuda_check(cudart.cudaDeviceSynchronize(), "cudaDeviceSynchronize")
