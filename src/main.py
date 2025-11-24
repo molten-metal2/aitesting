@@ -8,12 +8,10 @@ from config import (
     BANANA_CLASS,
     NMS_IOU_THRESH,
     DEBUG_MODE,
-    cudart,
-    cudaMemcpyHostToDevice,
-    cudaMemcpyDeviceToHost,
 )
 
 from cuda import (
+    cudart,
     cuda_malloc, 
     cuda_free, 
     cuda_memcpy,
