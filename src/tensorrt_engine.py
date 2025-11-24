@@ -1,9 +1,28 @@
 import numpy as np
 import tensorrt as trt
 from cuda import cuda_malloc
+from errors import EngineInitializationError
 
 
 # ========== TENSORRT SETUP ==========
+
+def initialize_engine(engine_path):
+    """
+    Initialize TensorRT engine and GPU buffers.
+    Returns engine context, tensor names, shapes, and device pointers.
+    Raises EngineInitializationError if initialization fails.
+    """
+    try:
+        print("Loading TensorRT engine...")
+        engine = load_engine(engine_path)
+        ctx, input_name, output_name, in_shape, out_shape, d_input, d_output = make_context_and_buffers(engine)
+        
+        print("Input tensor:", input_name, "shape:", in_shape)
+        print("Output tensor:", output_name, "shape:", out_shape)
+        
+        return ctx, input_name, output_name, in_shape, out_shape, d_input, d_output
+    except Exception as e:
+        raise EngineInitializationError(f"Failed to initialize TensorRT engine: {e}") from e
 
 def load_engine(path):
     """
