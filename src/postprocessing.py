@@ -4,65 +4,65 @@ from config import (
     CONF_THRESH,
     BANANA_CLASS,
     NMS_IOU_THRESH,
-    DEBUG_MODE
-
+    DEBUG_MODE,
+    INPUT_W,
+    INPUT_H
 )
 
 def nms(boxes, scores, iou_threshold=0.5):
     """
-    Performs Non-Maximum Suppression (NMS).
+    Performs Non-Maximum Suppression (NMS) using OpenCV's optimized C++ implementation.
     Used to eliminate overlapping bounding boxes and keep only the best detection for each object.
 
-    Pure NumPy Non-Maximum Suppression with division-by-zero protection.
-    boxes: (N,4) xyxy
-    scores: (N,)
-    Returns indices of kept boxes.
+    Args:
+        boxes: (N,4) array in xyxy format
+        scores: (N,) array of confidence scores
+        iou_threshold: IoU threshold for NMS
+    
+    Returns:
+        List of indices of kept boxes.
     """
     if len(boxes) == 0:
         return []
 
-    x1 = boxes[:, 0]
-    y1 = boxes[:, 1]
-    x2 = boxes[:, 2]
-    y2 = boxes[:, 3]
-
-    areas = (x2 - x1) * (y2 - y1)
-    order = scores.argsort()[::-1]
-
-    keep = []
-
-    while order.size > 0:
-        i = order[0]
-        keep.append(i)
-
-        if order.size == 1:
-            break
-
-        xx1 = np.maximum(x1[i], x1[order[1:]])
-        yy1 = np.maximum(y1[i], y1[order[1:]])
-        xx2 = np.minimum(x2[i], x2[order[1:]])
-        yy2 = np.minimum(y2[i], y2[order[1:]])
-
-        w = np.maximum(0.0, xx2 - xx1)
-        h = np.maximum(0.0, yy2 - yy1)
-        inter = w * h
-        
-        # Add epsilon to prevent division by zero
-        union = areas[i] + areas[order[1:]] - inter
-        iou = inter / (union + 1e-6)
-
-        inds = np.where(iou <= iou_threshold)[0]
-        order = order[inds + 1]
-
-    return keep
+    # Convert boxes from xyxy to xywh format for cv2.dnn.NMSBoxes
+    # cv2.dnn.NMSBoxes expects float32 arrays: [x, y, width, height]
+    boxes_xywh = np.zeros((len(boxes), 4), dtype=np.float32)
+    for i, box in enumerate(boxes):
+        x1, y1, x2, y2 = box
+        boxes_xywh[i] = [x1, y1, x2 - x1, y2 - y1]
+    
+    # Ensure scores are float32
+    scores_float = np.array(scores, dtype=np.float32)
+    
+    # Apply OpenCV's optimized NMS
+    # Returns array of indices of kept boxes
+    keep_indices = cv2.dnn.NMSBoxes(
+        bboxes=boxes_xywh.tolist(),
+        scores=scores_float.tolist(),
+        score_threshold=0.0,  # We already filtered by confidence
+        nms_threshold=iou_threshold
+    )
+    
+    # cv2.dnn.NMSBoxes returns a numpy array, convert to list for compatibility
+    return keep_indices.flatten().tolist() if len(keep_indices) > 0 else []
 
 
-def postprocess(output, frame):
+def postprocess(output, frame_shape):
     """
     Processes the raw output from the model.
-    Used to decode predictions, filter by class (banana) and confidence, apply NMS, and draw bounding boxes on the frame.
+    Returns detected banana boxes and count (data processing only, no visualization).
+    
+    Args:
+        output: Raw model output from TensorRT
+        frame_shape: Tuple of (height, width) of the original frame
+    
+    Returns:
+        Tuple of (boxes_xyxy, banana_count) where:
+            - boxes_xyxy: List of bounding boxes in (x1, y1, x2, y2) format, scaled to frame dimensions
+            - banana_count: Number of detected bananas after NMS
     """
-    h, w = frame.shape[:2]
+    h, w = frame_shape
     out = output[0]
 
     # Fix shape: (84,8400) -> (8400,84)
@@ -91,7 +91,7 @@ def postprocess(output, frame):
     mask = scores > CONF_THRESH
 
     if not np.any(mask):
-        return frame, 0
+        return [], 0
 
     boxes_xyxy = boxes_xyxy[mask]
     scores     = scores[mask]
@@ -103,7 +103,7 @@ def postprocess(output, frame):
     scores     = scores[banana_mask]
 
     if len(scores) == 0:
-        return frame, 0
+        return [], 0
     
     # Only print debug when we have banana detections
     if DEBUG_MODE and len(scores) > 0:
@@ -124,22 +124,18 @@ def postprocess(output, frame):
             print(f"[DEBUG] Suppressed {len(scores) - banana_count} duplicate detection(s)")
         print("-" * 60)
 
-    # Draw kept boxes
+    # Scale boxes to frame dimensions and return
+    scaled_boxes = []
     for i in keep:
         x1, y1, x2, y2 = boxes_xyxy[i]
 
-        # Scale to frame
-        x1 *= (w / 640)
-        y1 *= (h / 640)
-        x2 *= (w / 640)
-        y2 *= (h / 640)
+        # Scale from model space to frame dimensions
+        x1 *= (w / INPUT_W)
+        y1 *= (h / INPUT_H)
+        x2 *= (w / INPUT_W)
+        y2 *= (h / INPUT_H)
 
-        x1 = int(x1); y1 = int(y1)
-        x2 = int(x2); y2 = int(y2)
+        scaled_boxes.append([int(x1), int(y1), int(x2), int(y2)])
 
-        cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,255), 2)
-        cv2.putText(frame, "banana", (x1, y1-5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-
-    return frame, banana_count
+    return scaled_boxes, banana_count
 
